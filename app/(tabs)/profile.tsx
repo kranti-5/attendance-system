@@ -1,243 +1,344 @@
-import React, { useState, useEffect } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  Alert,
-  Switch,
-} from 'react-native';
+import CameraView from '@/components/CameraView';
+import { attendanceService, Employee } from '@/services/AttendanceService';
 import { Ionicons } from '@expo/vector-icons';
-import { attendanceService } from '@/services/AttendanceService';
+import { Image } from 'expo-image';
+import React, { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 export default function ProfileScreen() {
-  const [stats, setStats] = useState({
-    totalRecords: 0,
-    checkIns: 0,
-    checkOuts: 0,
-    verifiedRecords: 0,
-    pendingRecords: 0,
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [showEmployeeModal, setShowEmployeeModal] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [isUpdatingPhoto, setIsUpdatingPhoto] = useState(false);
+  const [showAddEmployee, setShowAddEmployee] = useState(false);
+  const [newEmployeePhoto, setNewEmployeePhoto] = useState<string>('');
+  const [newEmployeeData, setNewEmployeeData] = useState({
+    name: '',
+    position: '',
   });
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [locationEnabled, setLocationEnabled] = useState(true);
-
-  // Demo worker data
-  const currentWorker = {
-    id: 'worker_001',
-    name: 'John Doe',
-    position: 'Software Developer',
-    email: 'john.doe@company.com',
-    employeeId: 'EMP001',
-    department: 'Engineering',
-    joinDate: '2023-01-15',
-  };
 
   useEffect(() => {
-    loadStats();
+    loadEmployees();
   }, []);
 
-  const loadStats = async () => {
+  const loadEmployees = async () => {
     try {
-      const statsData = await attendanceService.getAttendanceStats(currentWorker.id);
-      setStats(statsData);
+      const employeeList = await attendanceService.getEmployees();
+      setEmployees(employeeList);
     } catch (error) {
-      console.error('Error loading stats:', error);
+      console.error('Error loading employees:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Logout', style: 'destructive', onPress: () => {
-          // In a real app, this would clear user session
-          Alert.alert('Logged out', 'You have been successfully logged out.');
-        }},
-      ]
-    );
+  const handleEmployeePress = (employee: Employee) => {
+    setSelectedEmployee(employee);
+    setShowEmployeeModal(true);
   };
 
-  const handleClearData = () => {
-    Alert.alert(
-      'Clear Data',
-      'This will clear all attendance records. This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Clear', style: 'destructive', onPress: () => {
-          // In a real app, this would clear local data
-          Alert.alert('Data Cleared', 'All attendance records have been cleared.');
-        }},
-      ]
-    );
+  const handleEditPhoto = () => {
+    setShowCamera(true);
   };
 
-  const renderStatCard = (title: string, value: number, icon: string, color: string) => (
-    <View style={styles.statCard}>
-      <View style={[styles.statIcon, { backgroundColor: color + '20' }]}>
-        <Ionicons name={icon as any} size={24} color={color} />
-      </View>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statTitle}>{title}</Text>
-    </View>
-  );
+  const handlePhotoTaken = async (photoUri: string) => {
+    setShowCamera(false);
+    setIsUpdatingPhoto(true);
 
-  const renderSettingItem = (
-    title: string,
-    subtitle: string,
-    icon: string,
-    onPress?: () => void,
-    showSwitch?: boolean,
-    switchValue?: boolean,
-    onSwitchChange?: (value: boolean) => void
-  ) => (
-    <TouchableOpacity
-      style={styles.settingItem}
-      onPress={onPress}
-      disabled={showSwitch}
-    >
-      <View style={styles.settingIcon}>
-        <Ionicons name={icon as any} size={24} color="#007AFF" />
+    try {
+      if (selectedEmployee) {
+        // Update employee photo
+        await attendanceService.updateEmployee(selectedEmployee.id, {
+          photoUri: photoUri,
+        });
+
+        // Reload employees to get updated data
+        await loadEmployees();
+
+        // Update selected employee with new photo
+        setSelectedEmployee({
+          ...selectedEmployee,
+          photoUri: photoUri,
+        });
+
+        Alert.alert('Success', 'Employee photo updated successfully!');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update employee photo. Please try again.');
+    } finally {
+      setIsUpdatingPhoto(false);
+    }
+  };
+
+  const handleAddEmployeePhoto = async (photoUri: string) => {
+    setShowCamera(false);
+    setNewEmployeePhoto(photoUri);
+  };
+
+  const handleAddEmployee = async () => {
+    if (!newEmployeeData.name.trim() || !newEmployeeData.position.trim()) {
+      Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+
+    if (!newEmployeePhoto) {
+      Alert.alert('Error', 'Please capture a photo for the employee');
+      return;
+    }
+
+    try {
+      await attendanceService.addEmployee({
+        name: newEmployeeData.name.trim(),
+        position: newEmployeeData.position.trim(),
+        photoUri: newEmployeePhoto,
+        isActive: true,
+      });
+
+      await loadEmployees();
+      setShowAddEmployee(false);
+      setNewEmployeePhoto('');
+      setNewEmployeeData({ name: '', position: '' });
+      Alert.alert('Success', 'Employee added successfully!');
+    } catch (error) {
+      Alert.alert('Error', 'Failed to add employee. Please try again.');
+    }
+  };
+
+  const getAttendanceStats = async (employeeId: string) => {
+    try {
+      const stats = await attendanceService.getAttendanceStats(employeeId);
+      return stats;
+    } catch (error) {
+      console.error('Error getting stats:', error);
+      return null;
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Loading employees...</Text>
       </View>
-      <View style={styles.settingContent}>
-        <Text style={styles.settingTitle}>{title}</Text>
-        <Text style={styles.settingSubtitle}>{subtitle}</Text>
-      </View>
-      {showSwitch ? (
-        <Switch
-          value={switchValue}
-          onValueChange={onSwitchChange}
-          trackColor={{ false: '#e0e0e0', true: '#007AFF' }}
-          thumbColor={switchValue ? 'white' : '#f4f3f4'}
-        />
-      ) : (
-        <Ionicons name="chevron-forward" size={20} color="#ccc" />
-      )}
-    </TouchableOpacity>
-  );
+    );
+  }
 
   return (
     <ScrollView style={styles.container}>
-      {/* Profile Header */}
-      <View style={styles.profileHeader}>
-        <View style={styles.avatarContainer}>
-          <View style={styles.avatar}>
-            <Ionicons name="person" size={60} color="#007AFF" />
-          </View>
-          <TouchableOpacity style={styles.editAvatarButton}>
-            <Ionicons name="camera" size={20} color="white" />
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Employee Management</Text>
+        <Text style={styles.headerSubtitle}>
+          Face recognition enabled employees
+        </Text>
+      </View>
+
+      {/* Employee List */}
+      <View style={styles.employeeList}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Registered Employees</Text>
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() => setShowAddEmployee(true)}
+          >
+            <Ionicons name="add" size={20} color="white" />
+            <Text style={styles.addButtonText}>Add Employee</Text>
           </TouchableOpacity>
         </View>
-        <Text style={styles.name}>{currentWorker.name}</Text>
-        <Text style={styles.position}>{currentWorker.position}</Text>
-        <Text style={styles.employeeId}>ID: {currentWorker.employeeId}</Text>
+        {employees.map((employee) => (
+          <TouchableOpacity
+            key={employee.id}
+            style={styles.employeeCard}
+            onPress={() => handleEmployeePress(employee)}
+          >
+            <Image
+              source={{ uri: employee.photoUri }}
+              style={styles.employeePhoto}
+              contentFit="cover"
+            />
+            <View style={styles.employeeInfo}>
+              <Text style={styles.employeeName}>{employee.name}</Text>
+              <Text style={styles.employeePosition}>{employee.position}</Text>
+              <View style={styles.statusIndicator}>
+                <View style={[styles.statusDot, { backgroundColor: '#4CAF50' }]} />
+                <Text style={styles.statusText}>Active</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={24} color="#ccc" />
+          </TouchableOpacity>
+        ))}
       </View>
 
-      {/* Stats Section */}
-      <View style={styles.statsSection}>
-        <Text style={styles.sectionTitle}>Your Statistics</Text>
-        <View style={styles.statsGrid}>
-          {renderStatCard('Total Records', stats.totalRecords, 'calendar', '#007AFF')}
-          {renderStatCard('Check-ins', stats.checkIns, 'log-in', '#4CAF50')}
-          {renderStatCard('Check-outs', stats.checkOuts, 'log-out', '#F44336')}
-          {renderStatCard('Verified', stats.verifiedRecords, 'checkmark-circle', '#4CAF50')}
-        </View>
-      </View>
-
-      {/* Personal Information */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Personal Information</Text>
+      {/* Face Recognition Info */}
+      <View style={styles.infoSection}>
+        <Text style={styles.sectionTitle}>Face Recognition System</Text>
         <View style={styles.infoCard}>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Email</Text>
-            <Text style={styles.infoValue}>{currentWorker.email}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Department</Text>
-            <Text style={styles.infoValue}>{currentWorker.department}</Text>
-          </View>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Join Date</Text>
-            <Text style={styles.infoValue}>
-              {new Date(currentWorker.joinDate).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-              })}
-            </Text>
-          </View>
+          <Ionicons name="camera" size={32} color="#007AFF" />
+          <Text style={styles.infoTitle}>How it works</Text>
+          <Text style={styles.infoText}>
+            When marking attendance, the system captures your photo and compares it with your registered employee image using advanced face recognition technology.
+          </Text>
+        </View>
+        
+        <View style={styles.infoCard}>
+          <Ionicons name="shield-checkmark" size={32} color="#4CAF50" />
+          <Text style={styles.infoTitle}>Security Features</Text>
+          <Text style={styles.infoText}>
+            • 75% confidence threshold for verification{'\n'}
+            • Real-time face detection{'\n'}
+            • Prevents attendance fraud{'\n'}
+            • Stores confidence scores
+          </Text>
         </View>
       </View>
 
-      {/* Settings */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Settings</Text>
-        <View style={styles.settingsCard}>
-          {renderSettingItem(
-            'Notifications',
-            'Receive attendance reminders and updates',
-            'notifications',
-            undefined,
-            true,
-            notificationsEnabled,
-            setNotificationsEnabled
-          )}
-          {renderSettingItem(
-            'Location Services',
-            'Include location in attendance records',
-            'location',
-            undefined,
-            true,
-            locationEnabled,
-            setLocationEnabled
-          )}
-          {renderSettingItem(
-            'Privacy Policy',
-            'Read our privacy policy',
-            'shield-checkmark',
-            () => Alert.alert('Privacy Policy', 'Privacy policy content would go here.')
-          )}
-          {renderSettingItem(
-            'Terms of Service',
-            'Read our terms of service',
-            'document-text',
-            () => Alert.alert('Terms of Service', 'Terms of service content would go here.')
-          )}
-        </View>
-      </View>
+      {/* Employee Detail Modal */}
+      <Modal
+        visible={showEmployeeModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        {selectedEmployee && (
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowEmployeeModal(false)}
+              >
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Employee Details</Text>
+            </View>
+            
+            <ScrollView style={styles.modalContent}>
+              <View style={styles.photoSection}>
+                <Image
+                  source={{ uri: selectedEmployee.photoUri }}
+                  style={styles.modalEmployeePhoto}
+                  contentFit="cover"
+                />
+                <TouchableOpacity
+                  style={styles.editPhotoButton}
+                  onPress={handleEditPhoto}
+                  disabled={isUpdatingPhoto}
+                >
+                  <Ionicons name="camera" size={20} color="white" />
+                  <Text style={styles.editPhotoText}>
+                    {isUpdatingPhoto ? 'Updating...' : 'Edit Photo'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              
+              <Text style={styles.modalEmployeeName}>{selectedEmployee.name}</Text>
+              <Text style={styles.modalEmployeePosition}>{selectedEmployee.position}</Text>
+              
+              <View style={styles.modalStats}>
+                <Text style={styles.modalStatsTitle}>Attendance Statistics</Text>
+                {/* Stats would be loaded here */}
+              </View>
+            </ScrollView>
+          </View>
+        )}
+      </Modal>
 
-      {/* Actions */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Actions</Text>
-        <View style={styles.settingsCard}>
-          {renderSettingItem(
-            'Export Data',
-            'Download your attendance records',
-            'download',
-            () => Alert.alert('Export', 'Data export functionality would be implemented here.')
-          )}
-          {renderSettingItem(
-            'Clear Data',
-            'Delete all local attendance records',
-            'trash',
-            handleClearData
-          )}
-          {renderSettingItem(
-            'Logout',
-            'Sign out of your account',
-            'log-out',
-            handleLogout
-          )}
+      {/* Add Employee Modal */}
+      <Modal
+        visible={showAddEmployee}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => {
+                setShowAddEmployee(false);
+                setNewEmployeePhoto('');
+                setNewEmployeeData({ name: '', position: '' });
+              }}
+            >
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitle}>Add New Employee</Text>
+          </View>
+          
+          <ScrollView style={styles.modalContent}>
+            <View style={styles.photoSection}>
+              {newEmployeePhoto ? (
+                <Image
+                  source={{ uri: newEmployeePhoto }}
+                  style={styles.modalEmployeePhoto}
+                  contentFit="cover"
+                />
+              ) : (
+                <View style={styles.placeholderPhoto}>
+                  <Ionicons name="person" size={60} color="#ccc" />
+                </View>
+              )}
+              <TouchableOpacity
+                style={styles.editPhotoButton}
+                onPress={() => setShowCamera(true)}
+              >
+                <Ionicons name="camera" size={20} color="white" />
+                <Text style={styles.editPhotoText}>
+                  {newEmployeePhoto ? 'Retake Photo' : 'Take Photo'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.inputSection}>
+              <Text style={styles.inputLabel}>Name</Text>
+              <TextInput
+                style={styles.textInput}
+                value={newEmployeeData.name}
+                onChangeText={(text) => setNewEmployeeData({ ...newEmployeeData, name: text })}
+                placeholder="Enter employee name"
+                placeholderTextColor="#999"
+              />
+              
+              <Text style={styles.inputLabel}>Position</Text>
+              <TextInput
+                style={styles.textInput}
+                value={newEmployeeData.position}
+                onChangeText={(text) => setNewEmployeeData({ ...newEmployeeData, position: text })}
+                placeholder="Enter employee position"
+                placeholderTextColor="#999"
+              />
+            </View>
+            
+            <TouchableOpacity
+              style={styles.addEmployeeButton}
+              onPress={handleAddEmployee}
+            >
+              <Text style={styles.addEmployeeButtonText}>Add Employee</Text>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
-      </View>
+      </Modal>
 
-      {/* App Info */}
-      <View style={styles.appInfo}>
-        <Text style={styles.appVersion}>Attendance System v1.0.0</Text>
-        <Text style={styles.appCopyright}>© 2024 Company Name</Text>
-      </View>
+      {/* Camera Modal for Photo Update/Add */}
+      <Modal
+        visible={showCamera}
+        animationType="slide"
+        presentationStyle="fullScreen"
+      >
+        <CameraView
+          onPhotoTaken={selectedEmployee ? handlePhotoTaken : handleAddEmployeePhoto}
+          onClose={() => setShowCamera(false)}
+        />
+      </Modal>
     </ScrollView>
   );
 }
@@ -247,178 +348,245 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  profileHeader: {
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#666',
+    fontSize: 16,
+    marginTop: 10,
+  },
+  header: {
     backgroundColor: 'white',
     padding: 20,
     paddingTop: 60,
-    alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
-  avatarContainer: {
-    position: 'relative',
-    marginBottom: 16,
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#f0f0f0',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  editAvatarButton: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#007AFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: 'white',
-  },
-  name: {
+  headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 4,
   },
-  position: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 8,
-  },
-  employeeId: {
+  headerSubtitle: {
     fontSize: 14,
-    color: '#999',
+    color: '#666',
+    marginTop: 5,
   },
-  statsSection: {
+  employeeList: {
     padding: 20,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 16,
   },
-  statsGrid: {
+  addButton: {
+    backgroundColor: '#4CAF50',
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  statCard: {
-    backgroundColor: 'white',
-    padding: 16,
-    borderRadius: 12,
     alignItems: 'center',
-    width: '47%',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  addButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginLeft: 5,
+  },
+  employeeCard: {
+    backgroundColor: 'white',
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 15,
+    borderRadius: 12,
+    marginBottom: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  statIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
+  employeePhoto: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 15,
   },
-  statValue: {
-    fontSize: 24,
+  employeeInfo: {
+    flex: 1,
+  },
+  employeeName: {
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 4,
   },
-  statTitle: {
+  employeePosition: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
+  statusIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 5,
+  },
+  statusText: {
     fontSize: 12,
     color: '#666',
-    textAlign: 'center',
   },
-  section: {
+  infoSection: {
     padding: 20,
   },
   infoCard: {
     backgroundColor: 'white',
+    padding: 20,
     borderRadius: 12,
-    padding: 16,
+    marginBottom: 15,
+    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  infoLabel: {
+  infoTitle: {
     fontSize: 16,
-    color: '#666',
-  },
-  infoValue: {
-    fontSize: 16,
+    fontWeight: 'bold',
     color: '#333',
-    fontWeight: '500',
+    marginTop: 10,
+    marginBottom: 10,
   },
-  settingsCard: {
+  infoText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  modalContainer: {
+    flex: 1,
     backgroundColor: 'white',
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
-  settingItem: {
+  modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    padding: 20,
+    paddingTop: 60,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#e0e0e0',
   },
-  settingIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  closeButton: {
+    padding: 5,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginLeft: 15,
+  },
+  modalContent: {
+    flex: 1,
+    padding: 20,
+  },
+  photoSection: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalEmployeePhoto: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    marginBottom: 15,
+  },
+  placeholderPhoto: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginBottom: 15,
   },
-  settingContent: {
-    flex: 1,
-  },
-  settingTitle: {
-    fontSize: 16,
-    color: '#333',
-    marginBottom: 2,
-  },
-  settingSubtitle: {
-    fontSize: 14,
-    color: '#666',
-  },
-  appInfo: {
+  editPhotoButton: {
+    backgroundColor: '#007AFF',
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
-    paddingBottom: 40,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
   },
-  appVersion: {
+  editPhotoText: {
+    color: 'white',
     fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
-  appCopyright: {
-    fontSize: 12,
-    color: '#999',
+  inputSection: {
+    marginBottom: 30,
+  },
+  inputLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 8,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 20,
+    backgroundColor: 'white',
+  },
+  addEmployeeButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  addEmployeeButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  modalEmployeeName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 5,
+  },
+  modalEmployeePosition: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 30,
+  },
+  modalStats: {
+    backgroundColor: '#f5f5f5',
+    padding: 20,
+    borderRadius: 12,
+  },
+  modalStatsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
   },
 }); 

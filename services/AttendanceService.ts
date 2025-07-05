@@ -1,3 +1,18 @@
+// Global type declarations
+declare global {
+  var attendanceStorage: AttendanceRecord[];
+  var employeesStorage: Employee[];
+}
+
+export interface Employee {
+  id: string;
+  name: string;
+  position: string;
+  photoUri: string;
+  faceEncoding?: number[]; // Face embedding for comparison
+  isActive: boolean;
+}
+
 export interface AttendanceRecord {
   id: string;
   workerId: string;
@@ -10,10 +25,249 @@ export interface AttendanceRecord {
     longitude: number;
   };
   status: 'pending' | 'verified' | 'rejected';
+  confidence?: number; // Face recognition confidence score
 }
 
 class AttendanceService {
   private storageKey = 'attendance_records';
+  private employeesKey = 'employees';
+
+  // Initialize with demo employees
+  constructor() {
+    this.initializeDemoEmployees();
+  }
+
+  private async initializeDemoEmployees() {
+    const existingEmployees = await this.getEmployees();
+    if (existingEmployees.length === 0) {
+      const demoEmployees: Employee[] = [
+        {
+          id: 'emp_001',
+          name: 'John Doe',
+          position: 'Software Developer',
+          photoUri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+          isActive: true,
+        },
+        {
+          id: 'emp_002',
+          name: 'Jane Smith',
+          position: 'UI/UX Designer',
+          photoUri: 'https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face',
+          isActive: true,
+        },
+        {
+          id: 'emp_003',
+          name: 'Mike Johnson',
+          position: 'Project Manager',
+          photoUri: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop&crop=face',
+          isActive: true,
+        },
+      ];
+      await this.saveEmployees(demoEmployees);
+    }
+  }
+
+  // Employee Management
+  async getEmployees(): Promise<Employee[]> {
+    try {
+      const employees = await this.getEmployeesFromStorage();
+      return employees.filter(emp => emp.isActive);
+    } catch (error) {
+      console.error('Error getting employees:', error);
+      return [];
+    }
+  }
+
+  async getEmployeeById(employeeId: string): Promise<Employee | null> {
+    const employees = await this.getEmployees();
+    return employees.find(emp => emp.id === employeeId) || null;
+  }
+
+  async addEmployee(employee: Omit<Employee, 'id'>): Promise<Employee> {
+    try {
+      const newEmployee: Employee = {
+        ...employee,
+        id: this.generateId(),
+      };
+
+      const employees = await this.getEmployeesFromStorage();
+      employees.push(newEmployee);
+      await this.saveEmployees(employees);
+
+      return newEmployee;
+    } catch (error) {
+      console.error('Error adding employee:', error);
+      throw error;
+    }
+  }
+
+  async updateEmployee(employeeId: string, updates: Partial<Employee>): Promise<void> {
+    try {
+      const employees = await this.getEmployeesFromStorage();
+      const employeeIndex = employees.findIndex(emp => emp.id === employeeId);
+      
+      if (employeeIndex !== -1) {
+        employees[employeeIndex] = { ...employees[employeeIndex], ...updates };
+        await this.saveEmployees(employees);
+      }
+    } catch (error) {
+      console.error('Error updating employee:', error);
+      throw error;
+    }
+  }
+
+  // Enhanced Face Recognition with Employee Matching
+  async recognizeFace(photoUri: string): Promise<{
+    recognized: boolean;
+    confidence: number;
+    workerId?: string;
+    workerName?: string;
+    matchedEmployee?: Employee;
+  }> {
+    try {
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Get all active employees
+      const employees = await this.getEmployees();
+      
+      if (employees.length === 0) {
+        return {
+          recognized: false,
+          confidence: 0,
+        };
+      }
+
+      // Simulate face recognition with employee matching
+      // In a real app, this would use a face recognition API like Face API, AWS Rekognition, etc.
+      const recognitionResults = await this.simulateFaceRecognition(photoUri, employees);
+      
+      return recognitionResults;
+    } catch (error) {
+      console.error('Face recognition error:', error);
+      return {
+        recognized: false,
+        confidence: 0,
+      };
+    }
+  }
+
+  private async simulateFaceRecognition(photoUri: string, employees: Employee[]): Promise<{
+    recognized: boolean;
+    confidence: number;
+    workerId?: string;
+    workerName?: string;
+    matchedEmployee?: Employee;
+  }> {
+    // Simulate face detection and feature extraction
+    const hasFace = Math.random() > 0.1; // 90% chance of detecting a face
+    
+    if (!hasFace) {
+      return {
+        recognized: false,
+        confidence: 0,
+      };
+    }
+
+    // Simulate matching with employees
+    const matchThreshold = 0.75; // 75% confidence threshold
+    const randomEmployee = employees[Math.floor(Math.random() * employees.length)];
+    const confidence = 0.6 + Math.random() * 0.35; // 60-95% confidence
+
+    if (confidence >= matchThreshold) {
+      return {
+        recognized: true,
+        confidence,
+        workerId: randomEmployee.id,
+        workerName: randomEmployee.name,
+        matchedEmployee: randomEmployee,
+      };
+    } else {
+      return {
+        recognized: false,
+        confidence,
+      };
+    }
+  }
+
+  // Enhanced attendance marking with face verification
+  async markAttendanceWithFaceVerification(
+    photoUri: string,
+    employeeId?: string
+  ): Promise<{
+    success: boolean;
+    record?: AttendanceRecord;
+    message: string;
+    confidence?: number;
+  }> {
+    try {
+      // Perform face recognition
+      const recognition = await this.recognizeFace(photoUri);
+      
+      if (!recognition.recognized) {
+        return {
+          success: false,
+          message: 'Face not recognized. Please ensure your face is clearly visible and try again.',
+          confidence: recognition.confidence,
+        };
+      }
+
+      // If employeeId is provided, verify it matches the recognized employee
+      if (employeeId && recognition.workerId !== employeeId) {
+        return {
+          success: false,
+          message: 'Face recognition mismatch. The recognized person does not match the expected employee.',
+          confidence: recognition.confidence,
+        };
+      }
+
+      const workerId = employeeId || recognition.workerId!;
+      const workerName = recognition.workerName!;
+
+      // Check if already checked in/out today
+      const hasCheckedIn = await this.hasCheckedInToday(workerId);
+      const hasCheckedOut = await this.hasCheckedOutToday(workerId);
+
+      let attendanceType: 'check-in' | 'check-out';
+      let message: string;
+
+      if (!hasCheckedIn) {
+        attendanceType = 'check-in';
+        message = `Check-in successful for ${workerName}!`;
+      } else if (!hasCheckedOut) {
+        attendanceType = 'check-out';
+        message = `Check-out successful for ${workerName}!`;
+      } else {
+        return {
+          success: false,
+          message: 'You have already completed both check-in and check-out for today.',
+        };
+      }
+
+      // Create attendance record
+      const record = await this.addAttendanceRecord({
+        workerId,
+        workerName,
+        type: attendanceType,
+        photoUri,
+        status: 'pending',
+        confidence: recognition.confidence,
+      });
+
+      return {
+        success: true,
+        record,
+        message,
+        confidence: recognition.confidence,
+      };
+    } catch (error) {
+      console.error('Error marking attendance:', error);
+      return {
+        success: false,
+        message: 'Failed to process attendance. Please try again.',
+      };
+    }
+  }
 
   // Get all attendance records
   async getAttendanceRecords(): Promise<AttendanceRecord[]> {
@@ -114,38 +368,8 @@ class AttendanceService {
     };
   }
 
-  // Simulate face recognition (in a real app, this would call an API)
-  async recognizeFace(photoUri: string): Promise<{
-    recognized: boolean;
-    confidence: number;
-    workerId?: string;
-    workerName?: string;
-  }> {
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // For demo purposes, simulate 80% success rate
-    const isRecognized = Math.random() > 0.2;
-    
-    if (isRecognized) {
-      return {
-        recognized: true,
-        confidence: 0.85 + Math.random() * 0.1, // 85-95% confidence
-        workerId: 'worker_001',
-        workerName: 'John Doe',
-      };
-    } else {
-      return {
-        recognized: false,
-        confidence: 0.3 + Math.random() * 0.4, // 30-70% confidence
-      };
-    }
-  }
-
   // Private methods for storage
   private async getFromStorage(): Promise<AttendanceRecord[]> {
-    // In a real app, this would use AsyncStorage or a database
-    // For now, we'll use a simple in-memory storage
     if (!global.attendanceStorage) {
       global.attendanceStorage = [];
     }
@@ -153,8 +377,18 @@ class AttendanceService {
   }
 
   private async saveToStorage(records: AttendanceRecord[]): Promise<void> {
-    // In a real app, this would use AsyncStorage or a database
     global.attendanceStorage = records;
+  }
+
+  private async getEmployeesFromStorage(): Promise<Employee[]> {
+    if (!global.employeesStorage) {
+      global.employeesStorage = [];
+    }
+    return global.employeesStorage;
+  }
+
+  private async saveEmployees(employees: Employee[]): Promise<void> {
+    global.employeesStorage = employees;
   }
 
   private generateId(): string {
