@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Alert, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import React, { useRef, useState } from 'react';
+import { Alert, Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface CameraViewProps {
   onPhotoTaken: (uri: string) => void;
@@ -9,25 +10,23 @@ interface CameraViewProps {
 
 const { width, height } = Dimensions.get('window');
 
-export default function CameraView({ onPhotoTaken, onClose }: CameraViewProps) {
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+export default function CameraViewComponent({ onPhotoTaken, onClose }: CameraViewProps) {
+  const [permission, requestPermission] = useCameraPermissions();
   const [type, setType] = useState<'front' | 'back'>('front');
   const [flash, setFlash] = useState<'on' | 'off'>('off');
-
-  useEffect(() => {
-    // Simulate permission request
-    setTimeout(() => {
-      setHasPermission(true);
-    }, 1000);
-  }, []);
+  const cameraRef = useRef<CameraView>(null);
 
   const takePicture = async () => {
-    try {
-      // Simulate photo capture
-      const mockPhotoUri = `data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=`;
-      onPhotoTaken(mockPhotoUri);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to take picture');
+    if (cameraRef.current) {
+      try {
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: 0.8,
+          base64: false,
+        });
+        onPhotoTaken(photo.uri);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to take picture');
+      }
     }
   };
 
@@ -39,7 +38,7 @@ export default function CameraView({ onPhotoTaken, onClose }: CameraViewProps) {
     setFlash(current => (current === 'off' ? 'on' : 'off'));
   };
 
-  if (hasPermission === null) {
+  if (!permission) {
     return (
       <View style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -50,13 +49,16 @@ export default function CameraView({ onPhotoTaken, onClose }: CameraViewProps) {
     );
   }
 
-  if (hasPermission === false) {
+  if (!permission.granted) {
     return (
       <View style={styles.container}>
         <View style={styles.errorContainer}>
           <Ionicons name="camera" size={48} color="#F44336" />
           <Text style={styles.errorText}>No access to camera</Text>
-          <TouchableOpacity style={styles.button} onPress={onClose}>
+          <TouchableOpacity style={styles.button} onPress={requestPermission}>
+            <Text style={styles.buttonText}>Grant Permission</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.button, { marginTop: 10 }]} onPress={onClose}>
             <Text style={styles.buttonText}>Go Back</Text>
           </TouchableOpacity>
         </View>
@@ -66,8 +68,12 @@ export default function CameraView({ onPhotoTaken, onClose }: CameraViewProps) {
 
   return (
     <View style={styles.container}>
-      {/* Mock Camera View */}
-      <View style={styles.camera}>
+      <CameraView
+        ref={cameraRef}
+        style={styles.camera}
+        facing={type}
+        flash={flash}
+      >
         <View style={styles.overlay}>
           {/* Header */}
           <View style={styles.header}>
@@ -87,7 +93,6 @@ export default function CameraView({ onPhotoTaken, onClose }: CameraViewProps) {
           <View style={styles.frameContainer}>
             <View style={styles.frame} />
             <Text style={styles.frameText}>Position your face in the frame</Text>
-            <Text style={styles.mockText}>📸 Mock Camera View</Text>
           </View>
 
           {/* Bottom Controls */}
@@ -103,7 +108,7 @@ export default function CameraView({ onPhotoTaken, onClose }: CameraViewProps) {
             <View style={styles.placeholder} />
           </View>
         </View>
-      </View>
+      </CameraView>
     </View>
   );
 }
@@ -115,7 +120,6 @@ const styles = StyleSheet.create({
   },
   camera: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
   },
   overlay: {
     flex: 1,
@@ -157,13 +161,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 20,
-  },
-  mockText: {
-    color: '#007AFF',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginTop: 20,
-    textAlign: 'center',
   },
   controls: {
     flexDirection: 'row',
