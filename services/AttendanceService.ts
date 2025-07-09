@@ -4,6 +4,8 @@ declare global {
   var employeesStorage: Employee[];
 }
 
+import { reactFaceRecognitionService } from './ReactFaceRecognitionService';
+
 export interface Employee {
   id: string;
   name: string;
@@ -11,6 +13,7 @@ export interface Employee {
   photoUri: string;
   faceEncoding?: number[]; // Face embedding for comparison
   isActive: boolean;
+  azurePersonId?: string; // Azure Face API person ID
 }
 
 export interface AttendanceRecord {
@@ -35,6 +38,20 @@ class AttendanceService {
   // Initialize with demo employees
   constructor() {
     this.initializeDemoEmployees();
+    this.initializeFaceRecognition();
+  }
+
+  private async initializeFaceRecognition() {
+    try {
+      const initialized = await reactFaceRecognitionService.initializeFaceset();
+      if (initialized) {
+        console.log('React Face recognition service initialized successfully');
+      } else {
+        console.log('React Face recognition service running in simulation mode');
+      }
+    } catch (error) {
+      console.error('Failed to initialize face recognition:', error);
+    }
   }
 
   private async initializeDemoEmployees() {
@@ -45,14 +62,14 @@ class AttendanceService {
           id: 'emp_001',
           name: 'John Doe',
           position: 'Software Developer',
-          photoUri: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop&crop=face',
+          photoUri: "./assets/images/kp1.jpg",
           isActive: true,
         },
         {
           id: 'emp_002',
           name: 'Jane Smith',
           position: 'UI/UX Designer',
-          photoUri: 'https://images.unsplash.com/photo-1494790108755-2616b612b786?w=150&h=150&fit=crop&crop=face',
+          photoUri: "./assets/images/kp2.jpg",
           isActive: true,
         },
         {
@@ -90,6 +107,18 @@ class AttendanceService {
         id: this.generateId(),
       };
 
+      // Register employee with face recognition service
+      try {
+        const azurePersonId = await reactFaceRecognitionService.addPersonToGroup(
+          newEmployee.id,
+          newEmployee.name,
+          newEmployee.photoUri
+        );
+        newEmployee.azurePersonId = azurePersonId;
+      } catch (error) {
+        console.warn('Failed to register employee with face recognition service:', error);
+      }
+
       const employees = await this.getEmployeesFromStorage();
       employees.push(newEmployee);
       await this.saveEmployees(employees);
@@ -107,7 +136,23 @@ class AttendanceService {
       const employeeIndex = employees.findIndex(emp => emp.id === employeeId);
       
       if (employeeIndex !== -1) {
-        employees[employeeIndex] = { ...employees[employeeIndex], ...updates };
+        const updatedEmployee = { ...employees[employeeIndex], ...updates };
+        
+        // If photo is updated, re-register with face recognition service
+        if (updates.photoUri && updates.photoUri !== employees[employeeIndex].photoUri) {
+          try {
+            const azurePersonId = await reactFaceRecognitionService.addPersonToGroup(
+              employeeId,
+              updatedEmployee.name,
+              updatedEmployee.photoUri
+            );
+            updatedEmployee.azurePersonId = azurePersonId;
+          } catch (error) {
+            console.warn('Failed to update employee in face recognition service:', error);
+          }
+        }
+        
+        employees[employeeIndex] = updatedEmployee;
         await this.saveEmployees(employees);
       }
     } catch (error) {
@@ -116,7 +161,7 @@ class AttendanceService {
     }
   }
 
-  // Enhanced Face Recognition with Employee Matching
+  // Enhanced Face Recognition with Real API
   async recognizeFace(photoUri: string): Promise<{
     recognized: boolean;
     confidence: number;
@@ -125,24 +170,34 @@ class AttendanceService {
     matchedEmployee?: Employee;
   }> {
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Get all active employees
-      const employees = await this.getEmployees();
+      // Use real face recognition service
+      const searchResult = await reactFaceRecognitionService.searchPerson(photoUri);
       
-      if (employees.length === 0) {
+      if (!searchResult.found || !searchResult.personId) {
         return {
           recognized: false,
-          confidence: 0,
+          confidence: searchResult.confidence,
         };
       }
 
-      // Simulate face recognition with employee matching
-      // In a real app, this would use a face recognition API like Face API, AWS Rekognition, etc.
-      const recognitionResults = await this.simulateFaceRecognition(photoUri, employees);
+      // Find employee by Face++ face token
+      const employees = await this.getEmployees();
+      const matchedEmployee = employees.find(emp => emp.azurePersonId === searchResult.personId);
       
-      return recognitionResults;
+      if (!matchedEmployee) {
+        return {
+          recognized: false,
+          confidence: searchResult.confidence,
+        };
+      }
+
+      return {
+        recognized: true,
+        confidence: searchResult.confidence,
+        workerId: matchedEmployee.id,
+        workerName: matchedEmployee.name,
+        matchedEmployee,
+      };
     } catch (error) {
       console.error('Face recognition error:', error);
       return {
@@ -152,45 +207,7 @@ class AttendanceService {
     }
   }
 
-  private async simulateFaceRecognition(photoUri: string, employees: Employee[]): Promise<{
-    recognized: boolean;
-    confidence: number;
-    workerId?: string;
-    workerName?: string;
-    matchedEmployee?: Employee;
-  }> {
-    // Simulate face detection and feature extraction
-    const hasFace = Math.random() > 0.1; // 90% chance of detecting a face
-    
-    if (!hasFace) {
-      return {
-        recognized: false,
-        confidence: 0,
-      };
-    }
-
-    // Simulate matching with employees
-    const matchThreshold = 0.75; // 75% confidence threshold
-    const randomEmployee = employees[Math.floor(Math.random() * employees.length)];
-    const confidence = 0.6 + Math.random() * 0.35; // 60-95% confidence
-
-    if (confidence >= matchThreshold) {
-      return {
-        recognized: true,
-        confidence,
-        workerId: randomEmployee.id,
-        workerName: randomEmployee.name,
-        matchedEmployee: randomEmployee,
-      };
-    } else {
-      return {
-        recognized: false,
-        confidence,
-      };
-    }
-  }
-
-  // Enhanced attendance marking with face verification
+  // Enhanced attendance marking with real face verification
   async markAttendanceWithFaceVerification(
     photoUri: string,
     employeeId?: string

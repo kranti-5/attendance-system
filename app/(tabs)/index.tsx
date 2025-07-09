@@ -4,14 +4,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 export default function AttendanceScreen() {
@@ -207,13 +207,13 @@ export default function AttendanceScreen() {
           </Text>
         </TouchableOpacity>
         <Text style={styles.attendanceNote}>
-          Face will be verified against {selectedEmployee.name}'s registered photo
+          Face will be verified against {selectedEmployee.name}&apos;s registered photo
         </Text>
       </View>
 
       {/* Today's Records */}
       <View style={styles.recordsSection}>
-        <Text style={styles.sectionTitle}>Today's Attendance</Text>
+        <Text style={styles.sectionTitle}>Today&apos;s Attendance</Text>
         {todayRecords.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="calendar-outline" size={48} color="#ccc" />
