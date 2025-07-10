@@ -6,100 +6,141 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
+  Alert,
+  Image,
+  CheckBox,
+  Linking,
 } from 'react-native';
 
-// Placeholder for Swiftvision Logo — use react-native-svg if needed
 function SwiftvisionLogo({ style }) {
   return (
-    <View style={[{ width: 48, height: 48, backgroundColor: '#e3f0fc', borderRadius: 24 }, style]}>
-      <Text style={{ color: '#1976d2', fontWeight: 'bold', fontSize: 10, textAlign: 'center', marginTop: 16 }}>
-        Swiftvision
-      </Text>
+    <View style={[{ width: 48, height: 48, backgroundColor: '#e3f0fc', borderRadius: 24, alignItems: 'center', justifyContent: 'center' }, style]}>
+      <Image
+        source={require('../assets/swiftvision-icon.png')}
+        style={{ width: 40, height: 40, borderRadius: 20 }}
+        resizeMode="contain"
+      />
     </View>
   );
 }
 
-export default function LoginScreen({ navigation }) {
-  const [mobileOrEmail, setMobileOrEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+function getPasswordStrength(password) {
+  let score = 0;
+  if (password.length >= 8) score++;
+  if (/[A-Z]/.test(password)) score++;
+  if (/[a-z]/.test(password)) score++;
+  if (/\d/.test(password)) score++;
+  if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) score++;
+  if (score <= 2) return { label: 'Weak', color: '#e57373' };
+  if (score === 3 || score === 4) return { label: 'Medium', color: '#ffb300' };
+  if (score === 5) return { label: 'Strong', color: '#43a047' };
+  return { label: '', color: '#ccc' };
+}
 
-  const handleLogin = () => {
-    if (!mobileOrEmail || !password) {
-      setError('Please enter your mobile/email and password.');
-      return;
+export default function LoginScreen({ navigation }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+
+  const validate = () => {
+    const newErrors = {};
+    if (!email.trim()) newErrors.email = 'Email is required.';
+    else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) newErrors.email = 'Invalid email address.';
+    if (!password) newErrors.password = 'Password is required.';
+    else {
+      if (password.length < 8) newErrors.password = 'At least 8 characters.';
+      else if (!/[A-Z]/.test(password)) newErrors.password = 'Must have uppercase letter.';
+      else if (!/[a-z]/.test(password)) newErrors.password = 'Must have lowercase letter.';
+      else if (!/\d/.test(password)) newErrors.password = 'Must have a digit.';
+      else if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) newErrors.password = 'Must have a special character.';
     }
-    // Allow both demo/demo and admin/admin
-    if ((mobileOrEmail === 'demo' && password === 'demo') || (mobileOrEmail === 'admin' && password === 'admin')) {
-      setError('');
-      navigation.replace('MainTabs');
-    } else {
-      setError('Invalid credentials.');
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleLogin = async () => {
+    if (!validate()) return;
+    setLoading(true);
+    try {
+      const response = await fetch('http://localhost/Demo/mobile-app/backend/login.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          emailOrMobile: email.trim(),
+          password: password,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        Alert.alert('Success', 'Login successful!');
+        navigation.replace('MainTabs');
+      } else {
+        setErrors({ api: data.error || 'Login failed. Please try again.' });
+      }
+    } catch (error) {
+      setErrors({ api: 'Network error. Please check your connection.' });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const content = (
-    <>
-      <View style={styles.logoBox}>
-        <SwiftvisionLogo />
-      </View>
-
-      {/* Heading + Subheading */}
-      <View style={{ width: '100%', alignItems: 'center', marginBottom: 20 }}>
-        <Text style={styles.heading}>Welcome Back</Text>
-        <Text style={styles.subheading}>Login to your account</Text>
-      </View>
-
-      <TextInput
-        style={styles.input}
-        placeholder="Mobile number or Email"
-        value={mobileOrEmail}
-        onChangeText={setMobileOrEmail}
-        keyboardType={Platform.OS === 'web' ? 'text' : 'default'}
-        autoCapitalize="none"
-        placeholderTextColor="#b0b8c1"
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        placeholderTextColor="#b0b8c1"
-      />
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <TouchableOpacity style={styles.button} onPress={handleLogin}>
-        <Text style={styles.buttonText}>Login</Text>
-      </TouchableOpacity>
-      <TouchableOpacity>
-        <Text style={styles.link}>Forgot password?</Text>
-      </TouchableOpacity>
-      <View style={styles.signupBox}>
-        <Text style={styles.signupText}>Don't have an account?</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-          <Text style={styles.signupLink}>Sign Up</Text>
-        </TouchableOpacity>
-      </View>
-    </>
-  );
+  const passwordStrength = getPasswordStrength(password);
 
   return (
     <View style={styles.bg}>
       <View style={styles.container}>
-        {Platform.OS === 'web' ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleLogin();
-            }}
-            style={{ width: '100%' }}
-            autoComplete="on"
+        <View style={styles.logoBox}>
+          <SwiftvisionLogo />
+        </View>
+        <Text style={styles.heading}>Welcome Back</Text>
+        <View style={{ width: '100%' }}>
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            placeholderTextColor="#b0b8c1"
+          />
+          {errors.email && <Text style={styles.error}>{errors.email}</Text>}
+          <TextInput
+            style={styles.input}
+            placeholder="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            placeholderTextColor="#b0b8c1"
+          />
+          {errors.password && <Text style={styles.error}>{errors.password}</Text>}
+          {errors.api && <Text style={styles.error}>{errors.api}</Text>}
+          <View style={styles.checkboxRow}>
+            <CheckBox
+              value={remember}
+              onValueChange={setRemember}
+              style={{ marginRight: 8 }}
+            />
+            <Text style={styles.checkboxText}>Remember me</Text>
+            <TouchableOpacity onPress={() => Linking.openURL('https://expo.dev/forgot-password')} style={{ marginLeft: 'auto' }}>
+              <Text style={styles.link}>Forgot password?</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            style={[styles.button, loading && styles.buttonDisabled]}
+            onPress={handleLogin}
+            disabled={loading}
           >
-            {content}
-          </form>
-        ) : (
-          content
-        )}
+            <Text style={styles.buttonText}>{loading ? 'Logging in...' : 'Login'}</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.signupBox}>
+          <Text style={styles.signupText}>Don't have an account?</Text>
+          <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
+            <Text style={styles.signupLink}>Sign Up</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -142,15 +183,10 @@ const styles = StyleSheet.create({
     fontSize: 27,
     fontWeight: '700',
     color: '#1a237e',
-    marginBottom: 4,
+    marginBottom: 16,
     fontFamily: 'Segoe UI, Arial',
     letterSpacing: 0.2,
-  },
-  subheading: {
-    fontSize: 15,
-    color: '#8ca0b3',
-    marginBottom: 14,
-    fontWeight: '400',
+    textAlign: 'center',
   },
   input: {
     width: '100%',
@@ -159,7 +195,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: 12,
     paddingHorizontal: 16,
-    marginBottom: 15,
+    marginBottom: 10,
     fontSize: 16,
     backgroundColor: '#f7fafd',
     color: '#222',
@@ -183,18 +219,16 @@ const styles = StyleSheet.create({
           shadowRadius: 6,
         }),
   },
+  buttonDisabled: {
+    backgroundColor: '#b0b8c1',
+    opacity: 0.7,
+  },
   buttonText: {
     color: '#fff',
     fontWeight: '600',
     fontSize: 17,
     letterSpacing: 0.2,
     fontFamily: 'Segoe UI, Arial',
-  },
-  link: {
-    color: '#4f8cff',
-    fontSize: 15,
-    marginBottom: 10,
-    fontWeight: '500',
   },
   error: {
     color: '#e57373',
@@ -217,5 +251,20 @@ const styles = StyleSheet.create({
     color: '#4f8cff',
     fontWeight: '600',
     fontSize: 15,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  checkboxText: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
+    flexWrap: 'wrap',
+  },
+  link: {
+    color: '#4f8cff',
+    textDecorationLine: 'underline',
   },
 });
