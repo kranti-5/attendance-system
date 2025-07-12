@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 import base64
 from werkzeug.utils import secure_filename
+from deepface import DeepFace
 
 app = Flask(__name__)
 CORS(app)
@@ -35,63 +36,17 @@ def save_employees(employees):
 def encode_face(image_path):
     """Encode face from image path using OpenCV"""
     try:
-        print(f'Loading image from: {image_path}')
-        print(f'File exists: {os.path.exists(image_path)}')
-        if os.path.exists(image_path):
-            print(f'File size: {os.path.getsize(image_path)} bytes')
-        
-        # Load image with OpenCV
-        image = cv2.imread(image_path)
-        if image is None:
-            print('Failed to load image with OpenCV')
+        # Get embedding using DeepFace (default model: VGG-Face)
+        embedding_objs = DeepFace.represent(img_path=image_path, model_name='VGG-Face', enforce_detection=True)
+        if embedding_objs and len(embedding_objs) > 0:
+            embedding = embedding_objs[0]['embedding']
+            print('DeepFace embedding generated')
+            return np.array(embedding)
+        else:
+            print('No face detected by DeepFace')
             return None
-            
-        print(f'Image shape: {image.shape}, dtype: {image.dtype}')
-        
-        # Convert to grayscale for face detection
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Load face cascade classifier
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        
-        # Detect faces
-        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-        print(f'Faces detected: {len(faces)}')
-        
-        if len(faces) == 0:
-            print('No faces detected in image')
-            return None
-        
-        # For each detected face, create a simple encoding
-        # This is a simplified approach - in production you'd want a proper face recognition library
-        face_encodings = []
-        for (x, y, w, h) in faces:
-            # Extract face region
-            face_roi = gray[y:y+h, x:x+w]
-            
-            # Resize to standard size
-            face_roi = cv2.resize(face_roi, (128, 128))
-            
-            # Create a simple encoding (flatten and normalize)
-            encoding = face_roi.flatten().astype(np.float32) / 255.0
-            
-            # Pad or truncate to 128 dimensions
-            if len(encoding) < 128:
-                encoding = np.pad(encoding, (0, 128 - len(encoding)), 'constant')
-            else:
-                encoding = encoding[:128]
-            
-            face_encodings.append(encoding)
-        
-        if face_encodings:
-            print(f'Successfully encoded {len(face_encodings)} face(s)')
-            return face_encodings[0]  # Return first face encoding
-        return None
-        
     except Exception as e:
-        print(f"Error encoding face: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"DeepFace error: {e}")
         return None
 
 def compare_faces(encoding1, encoding2, tolerance=0.6):
@@ -317,6 +272,11 @@ def mark_attendance():
             file = request.files[key]
             print(f'File {key}: filename={file.filename}, content_type={file.content_type}')
 
+        employee_id = request.form.get('employee_id', '').strip()
+        name = request.form.get('name', '').strip()
+        if not employee_id or not name:
+            return jsonify({'error': 'Employee ID and Name are required'}), 400
+
         # Multi-photo support (like /register)
         encodings = []
         saved_files = []
@@ -364,28 +324,25 @@ def mark_attendance():
         employees = load_employees()
         if not employees:
             return jsonify({'error': 'No employees registered in the system'}), 400
-        # Compare with registered employees
-        best_match = None
-        best_distance = float('inf')
-        tolerance = 0.6
-        print(f'Comparing with {len(employees)} registered employees')
-        for employee_id, employee_data in employees.items():
-            try:
-                stored_encoding = np.array(employee_data['face_encoding'])
-                distance = np.linalg.norm(attendance_encoding - stored_encoding)
-                print(f'Distance to {employee_data["name"]}: {distance}')
-                if distance < tolerance and distance < best_distance:
-                    best_distance = distance
-                    best_match = employee_data
-            except Exception as e:
-                print(f"Error comparing with employee {employee_id}: {e}")
-                continue
-        if best_match:
+        # Only compare with the provided employee_id and name
+        employee_data = employees.get(employee_id)
+        if not employee_data or employee_data['name'].strip().lower() != name.lower():
+            print('No matching employee found for provided ID and name')
+            return jsonify({'error': 'No matching employee found for provided ID and name.'}), 400
+        stored_encoding = np.array(employee_data['face_encoding'])
+        # Use cosine similarity for DeepFace embeddings
+        from numpy.linalg import norm
+        def cosine_similarity(a, b):
+            return np.dot(a, b) / (norm(a) * norm(b))
+        similarity = cosine_similarity(attendance_encoding, stored_encoding)
+        print(f'Cosine similarity to {employee_data["name"]}: {similarity}')
+        threshold = 0.4  # VGG-Face recommended threshold for cosine similarity
+        if similarity > threshold:
             attendance_record = {
-                'employee_id': best_match['employee_id'],
-                'name': best_match['name'],
+                'employee_id': employee_data['employee_id'],
+                'name': employee_data['name'],
                 'timestamp': datetime.now().isoformat(),
-                'confidence': 1 - best_distance
+                'similarity': float(similarity)
             }
             attendance_file = f"attendance_{datetime.now().strftime('%Y%m%d')}.json"
             attendance_path = os.path.join(UPLOAD_FOLDER, attendance_file)
@@ -396,19 +353,19 @@ def mark_attendance():
             attendance_records.append(attendance_record)
             with open(attendance_path, 'w') as f:
                 json.dump(attendance_records, f, indent=2)
-            print(f'Attendance marked for {best_match["name"]} with confidence {1 - best_distance:.2f}')
+            print(f'Attendance marked for {employee_data["name"]} with similarity {similarity:.2f}')
             return jsonify({
                 'success': True,
-                'message': f'Attendance marked for {best_match["name"]}',
+                'message': f'Attendance marked for {employee_data["name"]}',
                 'employee': {
-                    'name': best_match['name'],
-                    'employee_id': best_match['employee_id'],
-                    'confidence': 1 - best_distance
+                    'name': employee_data['name'],
+                    'employee_id': employee_data['employee_id'],
+                    'similarity': float(similarity)
                 }
             }), 200
         else:
-            print('No matching employee found')
-            return jsonify({'error': 'No matching employee found. Please ensure you are registered and use a clear, front-facing photo.'}), 400
+            print('Face does not match stored image (similarity too low)')
+            return jsonify({'error': 'Face does not match stored image. Please ensure you are the correct employee and use a clear, front-facing photo.'}), 400
     except Exception as e:
         print(f"Error marking attendance: {e}")
         import traceback
